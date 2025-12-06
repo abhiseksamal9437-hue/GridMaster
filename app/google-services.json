@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "940330099160",
+    "project_id": "gridmaster-d5ddb",
+    "storage_bucket": "gridmaster-d5ddb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:940330099160:android:b00448b79dbb3da4f652ad",
+        "android_client_info": {
+          "package_name": "com.example.gridmaster"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDA3pSlKh9OeeqB2MMdoHLf6zZ-zOY221c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
