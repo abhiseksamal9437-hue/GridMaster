@@ -1,5 +1,7 @@
 package com.example.gridmaster.data
-
+import android.net.Uri
+import com.google.firebase.storage.FirebaseStorage // Import this
+import kotlinx.coroutines.tasks.await // Import this
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -12,6 +14,8 @@ import java.util.Locale
 class FirestoreRepository {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
+
+    private val storage = FirebaseStorage.getInstance().reference
 
     // --- HELPER: GET CURRENT ENGINEER INFO ---
     // Extracts name from email (e.g., "b.sahoo@optcl.in" -> "B Sahoo")
@@ -169,5 +173,16 @@ class FirestoreRepository {
     suspend fun deleteDutyOverride(staffName: String, dateEpoch: Long) {
         val key = "${staffName}_${dateEpoch}"
         db.collection("duty_overrides").document(key).delete().await()
+    }
+    suspend fun uploadFaultImage(uri: Uri): String? {
+        return try {
+            val filename = "faults/${System.currentTimeMillis()}.jpg"
+            val ref = storage.child(filename)
+            ref.putFile(uri).await() // Upload
+            ref.downloadUrl.await().toString() // Get Link
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 }

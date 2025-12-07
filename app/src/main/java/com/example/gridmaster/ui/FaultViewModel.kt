@@ -1,5 +1,5 @@
 package com.example.gridmaster.ui
-
+import android.net.Uri
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -86,9 +86,14 @@ class FaultViewModel(private val repository: FirestoreRepository) : ViewModel() 
         tripTime: Long,
         // NEW: Restore Details
         restoreTime: Long? = null,
-        isRestored: Boolean = false
+        isRestored: Boolean = false,
+        localImageUri: Uri? = null
     ) {
         viewModelScope.launch {
+            var finalImageUrl: String? = null
+            if (localImageUri != null) {
+                finalImageUrl = repository.uploadFaultImage(localImageUri)
+            }
             val fault = FaultLog(
                 id = id,
                 feederName = feederName,
@@ -105,7 +110,8 @@ class FaultViewModel(private val repository: FirestoreRepository) : ViewModel() 
                 tripTime = tripTime,
                 restoreTime = restoreTime,
                 isRestored = isRestored,
-                remarks = remarks
+                remarks = remarks,
+                imageUrl = finalImageUrl // Save the link!
             )
 
             if (id.isEmpty()) {

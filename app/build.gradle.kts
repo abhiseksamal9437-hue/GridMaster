@@ -74,6 +74,12 @@ dependencies {
     implementation("com.google.firebase:firebase-auth")        // Login System
     implementation("com.google.firebase:firebase-firestore")   // Cloud Database
     implementation("androidx.compose.material:material-icons-extended")
+    // Firebase Storage
+    implementation("com.google.firebase:firebase-storage-ktx:20.3.0")
+    implementation("com.google.firebase:firebase-messaging-ktx:23.4.0")
+
+// Coil (For loading images in Jetpack Compose)
+    implementation("io.coil-kt:coil-compose:2.5.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

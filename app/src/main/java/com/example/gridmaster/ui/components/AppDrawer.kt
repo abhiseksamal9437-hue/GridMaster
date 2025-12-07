@@ -36,6 +36,7 @@ fun AppDrawer(
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.width(250.dp),
         drawerContentColor = MaterialTheme.colorScheme.onSurface
     ) {
         // --- 1. PREMIUM HEADER (Gmail Style) ---

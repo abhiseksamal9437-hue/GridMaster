@@ -1,7 +1,9 @@
 package com.example.gridmaster.ui
 
+import androidx.activity.result.contract.ActivityResultContracts
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.Context
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +38,14 @@ import com.example.gridmaster.data.VoltageLevel
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
+import android.net.Uri
+import android.widget.Toast
+import org.apache.poi.hpsf.Date
+import java.io.File
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -171,9 +181,13 @@ fun FaultScreen(
 
     if (showLogDialog) {
         LogFaultDialog(
-            existingFault = faultToEdit, viewModel = viewModel, onDismiss = { showLogDialog = false },
-            onConfirm = { id, feeder, volt, type, ia, ib, ic, rem, time, restoreTime, isRestored, pA, pB, pC, pG ->
-                viewModel.saveFault(id, feeder, volt, type, pA, pB, pC, pG, ia, ib, ic, rem, time, restoreTime, isRestored)
+            existingFault = faultToEdit,
+            viewModel = viewModel,
+            onDismiss = { showLogDialog = false },
+            // [FIX] Added 'uri' at the end of the list
+            onConfirm = { id, feeder, volt, type, ia, ib, ic, rem, time, restoreTime, isRestored, pA, pB, pC, pG, uri ->
+                // [FIX] Passed 'uri' to the viewModel function
+                viewModel.saveFault(id, feeder, volt, type, pA, pB, pC, pG, ia, ib, ic, rem, time, restoreTime, isRestored, uri)
                 showLogDialog = false
             }
         )
@@ -216,7 +230,7 @@ fun LogFaultDialog(
     viewModel: FaultViewModel,
     onDismiss: () -> Unit,
     // Updated Signature
-    onConfirm: (String, String, String, FaultType, String, String, String, String, Long, Long?, Boolean, Boolean, Boolean, Boolean, Boolean) -> Unit
+    onConfirm: (String, String, String, FaultType, String, String, String, String, Long, Long?, Boolean, Boolean, Boolean, Boolean, Boolean, Uri?) -> Unit
 ) {
     var step by remember(existingFault) { mutableIntStateOf(if(existingFault != null) 3 else 1) }
     var selectedVoltage by remember(existingFault) { mutableStateOf(if(existingFault?.voltageLevel == "132 kV") VoltageLevel.KV132 else VoltageLevel.KV33) }
@@ -237,6 +251,8 @@ fun LogFaultDialog(
     var selectedTime by remember(existingFault) { mutableLongStateOf(existingFault?.tripTime ?: System.currentTimeMillis()) }
     var isRestored by remember(existingFault) { mutableStateOf(existingFault?.isRestored ?: false) }
     var selectedRestoreTime by remember(existingFault) { mutableLongStateOf(existingFault?.restoreTime ?: System.currentTimeMillis()) }
+    var capturedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var tempPhotoUri by remember { mutableStateOf<Uri?>(null) } // For the camera to write to
 
     val context = LocalContext.current
     val dateFormat = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
@@ -250,6 +266,23 @@ fun LogFaultDialog(
                 onTimeSelected(cal.timeInMillis)
             }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
         }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+    }
+    // [CAMERA LAUNCHER]
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            capturedImageUri = tempPhotoUri
+        }
+    }
+
+    // [NEW] Gallery Launcher: Opens the phone's image picker
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            capturedImageUri = uri // Updates the preview and prepares for upload
+        }
     }
 
     AlertDialog(
@@ -300,6 +333,67 @@ fun LogFaultDialog(
                         OutlinedTextField(value = ib, onValueChange = { ib = it }, label = { Text("Ib") }, modifier = Modifier.weight(1f))
                         OutlinedTextField(value = ic, onValueChange = { ic = it }, label = { Text("Ic") }, modifier = Modifier.weight(1f))
                     }
+                    // ... inside LogFaultDialog ...
+
+                    Text("Photo Evidence:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp) // Gap between buttons
+                    ) {
+                        // BUTTON 1: CAMERA (Existing)
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    val file = context.createImageFile()
+                                    val authority = "${context.packageName}.provider"
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
+                                    tempPhotoUri = uri
+                                    cameraLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    android.widget.Toast.makeText(context, "Camera Error: ${e.localizedMessage}", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f) // Takes 50% width
+                        ) {
+                            Icon(Icons.Default.Add, null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Camera")
+                        }
+
+                        // BUTTON 2: GALLERY (New)
+                        OutlinedButton(
+                            onClick = {
+                                // Launch the gallery picker for images only
+                                galleryLauncher.launch("image/*")
+                            },
+                            modifier = Modifier.weight(1f) // Takes 50% width
+                        ) {
+                            // You can use a generic icon like Search or List since we don't have a Gallery icon imported
+                            Icon(Icons.Default.List, null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Gallery")
+                        }
+
+
+// ... Image Preview code follows here ...
+
+                    }
+
+                    // 2. Image Preview (If taken)
+                    if (capturedImageUri != null) {
+                        Spacer(Modifier.height(8.dp))
+                        AsyncImage(
+                            model = capturedImageUri,
+                            contentDescription = "Evidence",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(150.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Gray)
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(value = remarks, onValueChange = { remarks = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth())
                 }
@@ -309,7 +403,7 @@ fun LogFaultDialog(
             if (step == 3) {
                 Button(
                     onClick = {
-                        onConfirm(existingFault?.id ?: "", selectedFeeder, selectedVoltage.name, selectedFaultType, ia, ib, ic, remarks, selectedTime, if(isRestored) selectedRestoreTime else null, isRestored, pA, pB, pC, pG)
+                        onConfirm(existingFault?.id ?: "", selectedFeeder, selectedVoltage.name, selectedFaultType, ia, ib, ic, remarks, selectedTime, if(isRestored) selectedRestoreTime else null, isRestored, pA, pB, pC, pG,capturedImageUri)
                     }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C))
                 ) { Text(if(existingFault == null) "LOG TRIP" else "UPDATE") }
             }
@@ -377,6 +471,9 @@ fun ActiveFaultCard(fault: FaultLog, onRestoreClick: () -> Unit, onEdit: () -> U
             Column(Modifier.padding(16.dp).weight(1f)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(fault.feederName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    if (fault.imageUrl != null) {
+                        Icon(Icons.Default.CheckCircle, "Has Photo", tint = MaterialTheme.colorScheme.primary)
+                    }
                     Text(timeFormat.format(fault.tripTime), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F))
                 }
                 Spacer(Modifier.height(8.dp))
@@ -502,3 +599,5 @@ fun FaultMonthPicker(initialMillis: Long, onDismiss: () -> Unit, onDateSelected:
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+// Put this at the very bottom of FaultScreen.kt

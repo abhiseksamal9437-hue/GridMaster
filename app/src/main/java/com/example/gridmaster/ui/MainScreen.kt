@@ -103,8 +103,6 @@ fun MainScreen(
                 composable("maintenance") {
                     MaintenanceScreen(
                         viewModel = maintenanceViewModel,
-                        isDarkTheme = isDarkTheme,
-                        onToggleTheme = onToggleTheme,
                         onOpenDrawer = { scope.launch { drawerState.open() } } // <--- NEW PARAMETER
                     )
                 }

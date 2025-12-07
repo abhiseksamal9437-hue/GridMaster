@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
+import android.net.Uri
 
 class MaintenanceViewModel(
     application: Application,
@@ -106,8 +107,13 @@ class MaintenanceViewModel(
     }
 
     // SMART SAVE: Handles ADD (New) and EDIT (Update)
-    fun saveNote(id: String, title: String, description: String, equipment: EquipmentType, priority: Priority, date: Long) {
+    fun saveNote(id: String, title: String, description: String, equipment: EquipmentType, priority: Priority, date: Long,imageUri: Uri? = null) {
         viewModelScope.launch {
+            // 1. Upload Image (Reuse the repository function)
+            var finalImageUrl: String? = null
+            if (imageUri != null) {
+                finalImageUrl = repository.uploadFaultImage(imageUri) // We can reuse the same upload function
+            }
             val note = PlannedWork(
                 id = id, // If empty string, Repository creates new. If valid string, it updates.
                 title = title,
@@ -115,8 +121,10 @@ class MaintenanceViewModel(
                 equipmentType = equipment,
                 priority = priority,
                 scheduledDate = date,
-                isCompleted = false
+                isCompleted = false,
+                imageUrl = finalImageUrl
                 // createdBy/userId is handled inside Repository
+
             )
             repository.saveNote(note)
         }

@@ -36,8 +36,10 @@ object ExcelHelper {
         // 1. HEADERS (Your Exact Requirement)
         val headerRow = sheet.createRow(0)
         val headers = listOf(
-            "Sl No.", "Trip Date", "Trip Time", "Restore Date", "Restore Time",
-            "Duration", "Fault Type", "Affected Phase", // Phase col
+            "Sl No.",
+            "Feeder Name", // [NEW COLUMN HERE]
+            "Trip Date", "Trip Time", "Restore Date", "Restore Time",
+            "Duration", "Fault Type", "Affected Phase",
             "Ia (A)", "Ib (A)", "Ic (A)", "Reason", "Remarks"
         )
 
@@ -64,10 +66,12 @@ object ExcelHelper {
 
             // Col 1: Sl No.
             row.createCell(0).setCellValue((index + 1).toDouble())
+            // [NEW] Col 1: Feeder Name
+            row.createCell(1).setCellValue(fault.feederName)
 
             // Col 2 & 3: Trip Date & Time
-            row.createCell(1).setCellValue(dateFormat.format(tripDate))
-            row.createCell(2).setCellValue(timeFormat.format(tripDate))
+            row.createCell(2).setCellValue(dateFormat.format(tripDate))
+            row.createCell(3).setCellValue(timeFormat.format(tripDate))
 
             // Col 4, 5 & 6: Restoration Details
             if (fault.isRestored && fault.restoreTime != null) {
@@ -79,17 +83,17 @@ object ExcelHelper {
                 val minutes = TimeUnit.MILLISECONDS.toMinutes(diffMillis) % 60
                 val durationStr = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
 
-                row.createCell(3).setCellValue(dateFormat.format(restoreDate))
-                row.createCell(4).setCellValue(timeFormat.format(restoreDate))
-                row.createCell(5).setCellValue(durationStr)
+                row.createCell(4).setCellValue(dateFormat.format(restoreDate))
+                row.createCell(5).setCellValue(timeFormat.format(restoreDate))
+                row.createCell(6).setCellValue(durationStr)
             } else {
-                row.createCell(3).setCellValue("-")
                 row.createCell(4).setCellValue("-")
-                row.createCell(5).setCellValue("Active")
+                row.createCell(5).setCellValue("-")
+                row.createCell(6).setCellValue("Active")
             }
 
             // Col 7: Fault Type
-            row.createCell(6).setCellValue(fault.faultType.name)
+            row.createCell(7).setCellValue(fault.faultType.name)
 
             // Col 8: Affected Phase (Logic to build string)
             // --- UPDATED PHASE LOGIC ---
@@ -100,18 +104,18 @@ object ExcelHelper {
             if (fault.phaseG) phaseList.add("G") // Added Ground
 
             val phaseStr = if (phaseList.isEmpty()) "-" else phaseList.joinToString("-") // e.g., "R-G"
-            row.createCell(7).setCellValue(phaseStr)
+            row.createCell(8).setCellValue(phaseStr)
 
             // Col 9, 10, 11: Currents
-            row.createCell(8).setCellValue(fault.currentIA)
-            row.createCell(9).setCellValue(fault.currentIB)
-            row.createCell(10).setCellValue(fault.currentIC)
+            row.createCell(9).setCellValue(fault.currentIA)
+            row.createCell(10).setCellValue(fault.currentIB)
+            row.createCell(11).setCellValue(fault.currentIC)
 
             // Col 12: Reason
-            row.createCell(11).setCellValue(fault.reason)
+            row.createCell(12).setCellValue(fault.reason)
 
             // Col 13: Remarks
-            row.createCell(12).setCellValue(fault.remarks)
+            row.createCell(13).setCellValue(fault.remarks)
         }
 
         saveToDownloads(context, workbook, "GridMaster_Faults_${System.currentTimeMillis()}.xlsx")

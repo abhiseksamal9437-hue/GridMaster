@@ -1,5 +1,11 @@
 package com.example.gridmaster.ui
-
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.core.content.FileProvider
 import android.app.DatePickerDialog
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -33,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.alpha
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gridmaster.data.EquipmentType
 import com.example.gridmaster.data.MaintenanceFreq
@@ -42,13 +49,12 @@ import com.example.gridmaster.data.Priority
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaintenanceScreen(
     viewModel: MaintenanceViewModel,
-    isDarkTheme: Boolean,
-    onToggleTheme: () -> Unit,
     onOpenDrawer: () -> Unit // <--- NEW
 ) {
     // --- DATA STREAMS ---
@@ -103,23 +109,25 @@ fun MaintenanceScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f) // <--- THIS SAVES THE LAYOUT
+                    ) {
                         // --- DRAWER ICON ---
                         IconButton(onClick = onOpenDrawer) {
                             Icon(Icons.Default.Menu, "Menu", tint = MaterialTheme.colorScheme.onSurface)
                         }
                         Spacer(Modifier.width(8.dp))
                         Column {
-                            Text("Maintenance", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Maintenance", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
                             Text("Operations", fontSize = 20.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Light)
                         }
                     }
+                    Spacer(Modifier.width(8.dp)) // Safe gap
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // Kept Theme/Export for convenience, but you can remove Theme if you want to force Drawer usage
-                        IconButton(onClick = onToggleTheme, modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)) {
-                            Icon(Icons.Default.Star, "Theme", tint = if (isDarkTheme) Color(0xFFFFD600) else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+
                         IconButton(onClick = { showExportDialog = true }, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)) {
                             Icon(Icons.Default.DateRange, "Download", tint = MaterialTheme.colorScheme.primary)
                         }
@@ -176,12 +184,17 @@ fun MaintenanceScreen(
                 }
 
             } else {
-                // --- WORK ORDERS TAB ---
+                // --- WORK ORDERS TAB (Split View) ---
+
+                // 1. Split the list into Active and Completed
+                val activeNotes = notes.filter { !it.isCompleted }
+                val historyNotes = notes.filter { it.isCompleted }
+
                 LazyColumn(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Month Picker Button
+                    // Month Picker (Keep this at top)
                     item {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             OutlinedButton(
@@ -198,6 +211,7 @@ fun MaintenanceScreen(
                         }
                     }
 
+                    // 2. Empty State
                     if (notes.isEmpty()) {
                         item {
                             Text(
@@ -209,8 +223,9 @@ fun MaintenanceScreen(
                         }
                     }
 
-                    items(notes) { note ->
-                        WorkOrderCard(
+                    // 3. ACTIVE SECTION (No Header needed, just show them)
+                    items(activeNotes) { note ->
+                        ModernWorkOrderCard(
                             note = note,
                             onToggle = { viewModel.toggleNote(note) },
                             onEdit = {
@@ -220,6 +235,41 @@ fun MaintenanceScreen(
                             onDelete = { viewModel.deleteNote(note) }
                         )
                     }
+
+                    // 4. HISTORY SECTION (Only show if there are completed items)
+                    if (historyNotes.isNotEmpty()) {
+                        item {
+                            Spacer(Modifier.height(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Divider(Modifier.weight(1f))
+                                Text(
+                                    "COMPLETED HISTORY",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                                Divider(Modifier.weight(1f))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        items(historyNotes) { note ->
+                            // Render completed items with a slightly faded look (alpha)
+                            Box(modifier = Modifier.alpha(0.6f)) {
+                                ModernWorkOrderCard(
+                                    note = note,
+                                    onToggle = { viewModel.toggleNote(note) }, // Unchecking moves it back to Active!
+                                    onEdit = {
+                                        noteToEdit = note
+                                        showAddNoteDialog = true
+                                    },
+                                    onDelete = { viewModel.deleteNote(note) }
+                                )
+                            }
+                        }
+                    }
+
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
@@ -232,9 +282,10 @@ fun MaintenanceScreen(
         MaintAddNoteDialog(
             existingNote = noteToEdit,
             onDismiss = { showAddNoteDialog = false },
-            onConfirm = { t, d, e, p, date ->
+            // [UPDATE] Handle the new 'uri' parameter
+            onConfirm = { t, d, e, p, date, uri ->
                 val id = noteToEdit?.id ?: ""
-                viewModel.saveNote(id, t, d, e, p, date)
+                viewModel.saveNote(id, t, d, e, p, date, uri)
                 showAddNoteDialog = false
             }
         )
@@ -386,57 +437,136 @@ fun ExpandableEquipmentGroup(equipment: EquipmentType, tasks: List<MaintenanceTa
 }
 
 @Composable
-fun WorkOrderCard(note: PlannedWork, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
-    val dateFormat = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
-    val barColor = if (note.priority == Priority.CRITICAL) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
-    var expanded by remember { mutableStateOf(false) }
+fun ModernWorkOrderCard(
+    note: PlannedWork,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dateFormat = SimpleDateFormat("dd MMM", Locale.getDefault())
+    val isCritical = note.priority == Priority.CRITICAL
+
+    // Card Colors
+    val cardColor = MaterialTheme.colorScheme.surface
+    val priorityColor = if (isCritical) Color(0xFFD32F2F) else Color(0xFF1976D2)
+    val priorityLabel = if (isCritical) "CRITICAL" else "NORMAL"
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp), // Added elevation
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(4.dp),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable { onEdit() } // Click card to edit
     ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            Box(Modifier.width(6.dp).fillMaxHeight().background(barColor))
-            Column(Modifier.padding(16.dp).weight(1f)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(note.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, textDecoration = if (note.isCompleted) TextDecoration.LineThrough else null, color = MaterialTheme.colorScheme.onSurface)
-                    Text(dateFormat.format(note.scheduledDate), fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+        Column {
+            // --- HEADER: IMAGE & STATUS ---
+            Box(Modifier.height(140.dp).fillMaxWidth()) {
+                if (note.imageUrl != null) {
+                    // Show the attached photo
+                    AsyncImage(
+                        model = note.imageUrl,
+                        contentDescription = "Defect Photo",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Gradient overlay for text readability
+                    Box(Modifier.fillMaxSize().background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                        )
+                    ))
+                } else {
+                    // Fallback: Show a nice colored background with Icon
+                    Box(Modifier.fillMaxSize().background(priorityColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Build, // Or specific equipment icon
+                            contentDescription = null,
+                            tint = priorityColor.copy(alpha = 0.5f),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
                 }
-                Spacer(Modifier.height(4.dp))
 
-                Text(
-                    text = note.description,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.secondary,
-                    maxLines = if (expanded) Int.MAX_VALUE else 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (!expanded && note.description.length > 60) {
-                    Text("Tap to expand", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
-                }
-
-                Spacer(Modifier.height(8.dp))
-                Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(4.dp)) {
-                    Text(note.equipmentType.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                // Priority Badge (Top Right)
+                Surface(
+                    color = priorityColor,
+                    shape = RoundedCornerShape(bottomStart = 16.dp),
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Text(
+                        text = priorityLabel,
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
                 }
             }
 
-            // Actions Column (Checkbox, Edit, Delete)
-            Column(
-                modifier = Modifier.fillMaxHeight().padding(end = 8.dp, top = 8.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Checkbox(checked = note.isCompleted, onCheckedChange = { onToggle() })
+            // --- BODY: DETAILS ---
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Checkbox for "Done"
+                    Checkbox(
+                        checked = note.isCompleted,
+                        onCheckedChange = { onToggle() },
+                        colors = CheckboxDefaults.colors(checkedColor = priorityColor)
+                    )
+                    Spacer(Modifier.width(8.dp))
 
-                Column {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = note.title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            textDecoration = if (note.isCompleted) TextDecoration.LineThrough else null
+                        )
+                        Text(
+                            text = note.equipmentType.name.replace("_", " "),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Delete, "Delete", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = note.description,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(16.dp))
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(8.dp))
+
+                // --- FOOTER: META INFO ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                        Spacer(Modifier.width(4.dp))
+                        Text(dateFormat.format(note.scheduledDate), fontSize = 12.sp, color = Color.Gray)
+
+                        Spacer(Modifier.width(16.dp))
+
+                        Icon(Icons.Default.Person, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                        Spacer(Modifier.width(4.dp))
+                        // Assuming you might want to show who created it
+                        Text(if(note.createdBy.isNotEmpty()) note.createdBy else "Me", fontSize = 12.sp, color = Color.Gray)
+                    }
+
+                    // Delete Button
+                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Delete, "Delete", tint = Color.Gray)
                     }
                 }
             }
@@ -468,48 +598,199 @@ fun CircularProgress(progress: Float, size: Dp, color: Color) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MaintAddNoteDialog(existingNote: PlannedWork?, onDismiss: () -> Unit, onConfirm: (String, String, EquipmentType, Priority, Long) -> Unit) {
+fun MaintAddNoteDialog(
+    existingNote: PlannedWork?,
+    onDismiss: () -> Unit,
+    // The signature expects 6 parameters now
+    onConfirm: (String, String, EquipmentType, Priority, Long, Uri?) -> Unit
+) {
+    // 1. FORM STATE
     var title by remember { mutableStateOf(existingNote?.title ?: "") }
     var description by remember { mutableStateOf(existingNote?.description ?: "") }
     var priority by remember { mutableStateOf(existingNote?.priority ?: Priority.NORMAL) }
     var selectedDate by remember { mutableLongStateOf(existingNote?.scheduledDate ?: System.currentTimeMillis()) }
-
     var equipmentExpanded by remember { mutableStateOf(false) }
     var selectedEquipment by remember { mutableStateOf(existingNote?.equipmentType ?: EquipmentType.GENERAL) }
 
-    val context = LocalContext.current
+    // 2. IMAGE STATE
+    // Initialize with existing URL if editing, or null if new
+    // Note: We only track *new* URIs here. If null, the ViewModel keeps the old one.
+    var capturedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    // 3. SYSTEM HELPERS
+    val context = LocalContext.current // [FIX] Defined only once
     val calendar = Calendar.getInstance()
-    val datePickerDialog = DatePickerDialog(context, { _, y, m, d -> calendar.set(y, m, d); selectedDate = calendar.timeInMillis }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH))
     val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+
+    // 4. LAUNCHERS
+    // [FIX] Explicitly added 'success: Boolean' type
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success) {
+            capturedImageUri = tempPhotoUri
+        }
+    }
+
+    // [FIX] Explicitly added 'uri: Uri?' type
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            capturedImageUri = uri
+        }
+    }
+
+    // 5. DATE PICKER
+    val datePickerDialog = DatePickerDialog(
+        context,
+        { _, y, m, d ->
+            calendar.set(y, m, d)
+            selectedDate = calendar.timeInMillis
+        },
+        calendar.get(Calendar.YEAR),
+        calendar.get(Calendar.MONTH),
+        calendar.get(Calendar.DAY_OF_MONTH)
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if(existingNote == null) "New Work Order" else "Edit Work Order") },
+        title = { Text(if (existingNote == null) "New Work Order" else "Edit Work Order") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Details") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                // --- FORM FIELDS ---
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Details") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
                 Box(Modifier.fillMaxWidth()) {
-                    OutlinedTextField(value = selectedEquipment.name, onValueChange = {}, readOnly = true, label = { Text("Equipment") }, trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) }, modifier = Modifier.fillMaxWidth().clickable { equipmentExpanded = true })
-                    DropdownMenu(expanded = equipmentExpanded, onDismissRequest = { equipmentExpanded = false }) {
-                        EquipmentType.values().forEach { type -> DropdownMenuItem(text = { Text(type.name) }, onClick = { selectedEquipment = type; equipmentExpanded = false }) }
+                    OutlinedTextField(
+                        value = selectedEquipment.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Equipment") },
+                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                        modifier = Modifier.fillMaxWidth().clickable { equipmentExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = equipmentExpanded,
+                        onDismissRequest = { equipmentExpanded = false }
+                    ) {
+                        EquipmentType.values().forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(type.name) },
+                                onClick = {
+                                    selectedEquipment = type
+                                    equipmentExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = dateFormat.format(selectedDate),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Date") },
+                    trailingIcon = {
+                        IconButton(onClick = { datePickerDialog.show() }) {
+                            Icon(Icons.Default.DateRange, null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = priority == Priority.NORMAL,
+                        onClick = { priority = Priority.NORMAL }
+                    )
+                    Text("Normal")
+                    Spacer(Modifier.width(16.dp))
+                    RadioButton(
+                        selected = priority == Priority.CRITICAL,
+                        onClick = { priority = Priority.CRITICAL }
+                    )
+                    Text("Critical")
+                }
+
+                // --- PHOTO SECTION ---
+                Spacer(Modifier.height(16.dp))
+                Text("Attach Photo:", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val file = context.createImageFile()
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.provider",
+                                    file
+                                )
+                                tempPhotoUri = uri
+                                cameraLauncher.launch(uri)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Error: ${e.message}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Add, null)
+                        Text("Camera")
+                    }
+
+                    OutlinedButton(
+                        onClick = { galleryLauncher.launch("image/*") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.List, null)
+                        Text("Gallery")
                     }
                 }
 
-                OutlinedTextField(value = dateFormat.format(selectedDate), onValueChange = {}, readOnly = true, label = { Text("Date") }, trailingIcon = { IconButton(onClick = { datePickerDialog.show() }) { Icon(Icons.Default.DateRange, null) } }, modifier = Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = priority == Priority.NORMAL, onClick = { priority = Priority.NORMAL }); Text("Normal")
-                    Spacer(Modifier.width(16.dp))
-                    RadioButton(selected = priority == Priority.CRITICAL, onClick = { priority = Priority.CRITICAL }); Text("Critical")
+                // PREVIEW
+                if (capturedImageUri != null) {
+                    Spacer(Modifier.height(8.dp))
+                    AsyncImage(
+                        model = capturedImageUri,
+                        contentDescription = "Preview",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
                 }
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(title, description, selectedEquipment, priority, selectedDate) }) { Text(if(existingNote == null) "Create" else "Update") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        confirmButton = {
+            Button(onClick = {
+                // [FIX] Passing 'capturedImageUri' as the 6th argument
+                onConfirm(title, description, selectedEquipment, priority, selectedDate, capturedImageUri)
+            }) {
+                Text(if (existingNote == null) "Create Ticket" else "Update Ticket")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
     )
 }
-
 @Composable
 fun MaintMonthPicker(initialMillis: Long, onDismiss: () -> Unit, onDateSelected: (Long) -> Unit) {
     val calendar = Calendar.getInstance()

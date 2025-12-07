@@ -62,6 +62,8 @@ data class FaultLog(
 
     val remarks: String = "",
     val reason: String = "",
+
+    val imageUrl: String? = null,
     val userId: String = "",
     val userName: String = "",
     val timestamp: Long = System.currentTimeMillis()
@@ -111,5 +113,7 @@ data class PlannedWork(
     val isCompleted: Boolean = false,
 
     val createdBy: String = "",
-    val createdById: String = ""
+    val createdById: String = "",
+    // [NEW] Add this field
+    val imageUrl: String? = null
 )
