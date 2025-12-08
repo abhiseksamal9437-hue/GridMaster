@@ -107,7 +107,17 @@ class MaintenanceViewModel(
     }
 
     // SMART SAVE: Handles ADD (New) and EDIT (Update)
-    fun saveNote(id: String, title: String, description: String, equipment: EquipmentType, priority: Priority, date: Long,imageUri: Uri? = null) {
+    fun saveNote(
+        id: String,
+        title: String,
+        description: String,
+        equipment: EquipmentType,
+        priority: Priority,
+        scheduledDate: Long,     // When it SHOULD be done
+        executionDate: Long?,    // When it WAS done (Optional)
+        imageUri: Uri? = null,
+        existingCreationDate: Long // Keep original creation date if editing
+    ){
         viewModelScope.launch {
             // 1. Upload Image (Reuse the repository function)
             var finalImageUrl: String? = null
@@ -115,16 +125,23 @@ class MaintenanceViewModel(
                 finalImageUrl = repository.uploadFaultImage(imageUri) // We can reuse the same upload function
             }
             val note = PlannedWork(
-                id = id, // If empty string, Repository creates new. If valid string, it updates.
+                id = id,
                 title = title,
                 description = description,
                 equipmentType = equipment,
                 priority = priority,
-                scheduledDate = date,
-                isCompleted = false,
-                imageUrl = finalImageUrl
-                // createdBy/userId is handled inside Repository
+                scheduledDate = scheduledDate,
 
+                // [NEW] Set Dates
+                creationDate = existingCreationDate, // Preserve original date
+                executionDate = executionDate,       // Save user input
+
+                // Auto-complete if execution date is set? Or keep manual?
+                // Let's keep manual isCompleted, but usually if execution date exists, it is done.
+                // For now, keep existing 'isCompleted' logic or default it:
+                isCompleted = (executionDate != null),
+
+                imageUrl = finalImageUrl
             )
             repository.saveNote(note)
         }

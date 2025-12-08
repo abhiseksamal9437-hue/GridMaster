@@ -107,6 +107,10 @@ data class PlannedWork(
     val equipmentType: EquipmentType = EquipmentType.GENERAL,
     val priority: Priority = Priority.NORMAL,
     val scheduledDate: Long = 0L,
+    // 2. [NEW] CREATION DATE (Fixed, set once)
+    val creationDate: Long = System.currentTimeMillis(),
+    // 3. [NEW] EXECUTION DATE (Nullable, because it might not be done yet)
+    val executionDate: Long? = null,
 
     // FIX: Force Firebase mapping
     @get:PropertyName("isCompleted")

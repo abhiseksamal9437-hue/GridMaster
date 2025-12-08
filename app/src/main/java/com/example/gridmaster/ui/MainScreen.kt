@@ -119,6 +119,11 @@ fun MainScreen(
                         onOpenDrawer = { scope.launch { drawerState.open() } } // <--- NEW PARAMETER
                     )
                 }
+                composable("store") {
+                    StoreScreen(
+                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                    )
+                }
 
                 // --- TOOLS (These have Back buttons, so no Drawer needed) ---
                 composable("tool_battery") { ToolBattery(onBack = { navController.popBackStack() }) }

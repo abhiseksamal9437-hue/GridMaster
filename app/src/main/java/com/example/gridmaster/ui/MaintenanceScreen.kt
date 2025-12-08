@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import androidx.compose.foundation.verticalScroll
+import com.example.gridmaster.data.TransactionType // [FIX] Added Import
+import android.widget.Toast
 import androidx.compose.foundation.rememberScrollState
 import androidx.core.content.FileProvider
 import android.app.DatePickerDialog
@@ -50,12 +52,17 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import coil.compose.AsyncImage
+import com.example.gridmaster.ui.StoreViewModel
+import com.example.gridmaster.ui.MaterialPickerDialog
+import com.example.gridmaster.ui.StoreTransactionDialog
+import com.example.gridmaster.data.StoreItem
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaintenanceScreen(
-    viewModel: MaintenanceViewModel,
-    onOpenDrawer: () -> Unit // <--- NEW
+    viewModel: MaintenanceViewModel = viewModel(factory = MaintenanceViewModel.Factory),
+    // [NEW] Add StoreViewModel
+    storeViewModel: StoreViewModel = viewModel(factory = StoreViewModel.Factory),
+    onOpenDrawer: () -> Unit
 ) {
     // --- DATA STREAMS ---
     val tasks by viewModel.filteredTasks.collectAsState()
@@ -64,6 +71,7 @@ fun MaintenanceScreen(
     val selectedFreq by viewModel.selectedFreq.collectAsState()
     val selectedEquip by viewModel.selectedEquipment.collectAsState()
     val currentMonthMillis by viewModel.currentMonth.collectAsState()
+    val storeInventory by storeViewModel.inventory.collectAsState()
 
     // --- UI STATE ---
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -72,6 +80,9 @@ fun MaintenanceScreen(
     var showDailyBriefing by remember { mutableStateOf(!viewModel.isBriefingSeen) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
+    var showMaterialPicker by remember { mutableStateOf(false) }
+    var showStoreTransDialog by remember { mutableStateOf(false) }
+    var selectedStoreItem by remember { mutableStateOf<StoreItem?>(null) }
 
     val context = LocalContext.current
     val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
@@ -278,15 +289,86 @@ fun MaintenanceScreen(
 
     // --- DIALOGS ---
 
+// ... inside MaintenanceScreen ...
+
+    // 1. THE WORK ORDER DIALOG
     if (showAddNoteDialog) {
         MaintAddNoteDialog(
             existingNote = noteToEdit,
             onDismiss = { showAddNoteDialog = false },
-            // [UPDATE] Handle the new 'uri' parameter
-            onConfirm = { t, d, e, p, date, uri ->
+            onAttachMaterial = { showMaterialPicker = true },
+            // [UPDATE] Now receives executionDate (Long?)
+            onConfirm = { t, d, e, p, schedDate, execDate, uri ->
                 val id = noteToEdit?.id ?: ""
-                viewModel.saveNote(id, t, d, e, p, date, uri)
+
+                // Pass existing creation date (or 0 if new, ViewModel handles default)
+                val creation = noteToEdit?.creationDate ?: System.currentTimeMillis()
+
+                viewModel.saveNote(
+                    id = id,
+                    title = t,
+                    description = d,
+                    equipment = e,
+                    priority = p,
+                    scheduledDate = schedDate,
+                    executionDate = execDate, // [NEW]
+                    imageUri = uri,
+                    existingCreationDate = creation // [NEW]
+                )
                 showAddNoteDialog = false
+            }
+        )
+    }
+
+    // 2. THE MATERIAL PICKER (Mini Store)
+    if (showMaterialPicker) {
+        MaterialPickerDialog(
+            storeItems = storeInventory,
+            onDismiss = { showMaterialPicker = false },
+            onItemSelected = { item ->
+                selectedStoreItem = item
+                showMaterialPicker = false
+                showStoreTransDialog = true // Proceed to Issue/Receive
+            }
+        )
+    }
+
+    // 3. THE TRANSACTION DIALOG (Issue/Receive)
+    if (showStoreTransDialog && selectedStoreItem != null) {
+        StoreTransactionDialog(
+            item = selectedStoreItem!!,
+            onDismiss = { showStoreTransDialog = false },
+            onConfirm = { type, qty, ref, remark ->
+                // Use Work Order Title as the "Reference" if available, else "Work Order"
+                val jobRef = if (noteToEdit?.title?.isNotEmpty() == true) "WO: ${noteToEdit!!.title}" else "New Work Order"
+
+                storeViewModel.executeTransaction(
+                    item = selectedStoreItem!!,
+                    type = type,
+                    qtyStr = qty,
+                    ref = jobRef,
+                    remarks = remark,
+                    onSuccess = {
+                        // [AUTO-LOGIC] Append the transaction to the Work Order Description
+                        val action = if(type == TransactionType.ISSUE) "Issued" else "Received"
+                        val logLine = "\n[Store Log]: $action $qty ${selectedStoreItem!!.unit} - ${selectedStoreItem!!.legacyName}"
+
+                        // Update the Note being edited so the user sees the change immediately
+                        if (noteToEdit != null) {
+                            noteToEdit = noteToEdit!!.copy(description = noteToEdit!!.description + logLine)
+                        } else {
+                            // If it's a new note, we can't easily update the dialog state from here without complex state hoisting.
+                            // For V1, we simply Toast.
+                            // In V2, we can hoist the 'description' state to the parent.
+                        }
+
+                        Toast.makeText(context, "Material Transaction Logged!", Toast.LENGTH_SHORT).show()
+                        showStoreTransDialog = false
+                    },
+                    onError = { error ->
+                        Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                    }
+                )
             }
         )
     }
@@ -458,30 +540,27 @@ fun ModernWorkOrderCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable { onEdit() } // Click card to edit
+            .clickable { onEdit() }
     ) {
         Column {
             // --- HEADER: IMAGE & STATUS ---
             Box(Modifier.height(140.dp).fillMaxWidth()) {
                 if (note.imageUrl != null) {
-                    // Show the attached photo
                     AsyncImage(
                         model = note.imageUrl,
                         contentDescription = "Defect Photo",
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
-                    // Gradient overlay for text readability
                     Box(Modifier.fillMaxSize().background(
                         androidx.compose.ui.graphics.Brush.verticalGradient(
                             colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
                         )
                     ))
                 } else {
-                    // Fallback: Show a nice colored background with Icon
                     Box(Modifier.fillMaxSize().background(priorityColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.Build, // Or specific equipment icon
+                            imageVector = Icons.Default.Build,
                             contentDescription = null,
                             tint = priorityColor.copy(alpha = 0.5f),
                             modifier = Modifier.size(64.dp)
@@ -489,7 +568,6 @@ fun ModernWorkOrderCard(
                     }
                 }
 
-                // Priority Badge (Top Right)
                 Surface(
                     color = priorityColor,
                     shape = RoundedCornerShape(bottomStart = 16.dp),
@@ -508,7 +586,6 @@ fun ModernWorkOrderCard(
             // --- BODY: DETAILS ---
             Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Checkbox for "Done"
                     Checkbox(
                         checked = note.isCompleted,
                         onCheckedChange = { onToggle() },
@@ -545,35 +622,71 @@ fun ModernWorkOrderCard(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(8.dp))
 
-                // --- FOOTER: META INFO ---
+                // --- FOOTER: DATES & ACTIONS ---
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Bottom // Align bottom so dates stack nicely
                 ) {
+                    // LEFT SIDE: DATES
+                    Column {
+                        // 1. Scheduled Date (Plan)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.DateRange, null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Plan: ${dateFormat.format(note.scheduledDate)}",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
+                        // 2. Execution Date (Actual)
+                        val isExecuted = note.executionDate != null
+                        val execColor = if (isExecuted) Color(0xFF2E7D32) else Color(0xFFE65100) // Green or Orange
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if(isExecuted) Icons.Default.CheckCircle else Icons.Default.Info,
+                                null,
+                                modifier = Modifier.size(12.dp),
+                                tint = execColor
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (isExecuted) "Done: ${dateFormat.format(note.executionDate!!)}" else "Pending",
+                                fontSize = 12.sp,
+                                color = execColor,
+                                fontWeight = if (isExecuted) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+
+                    // RIGHT SIDE: CREATOR & DELETE
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                        // Creator Name
+                        Icon(Icons.Default.Person, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
                         Spacer(Modifier.width(4.dp))
-                        Text(dateFormat.format(note.scheduledDate), fontSize = 12.sp, color = Color.Gray)
+                        Text(
+                            text = if(note.createdBy.isNotEmpty()) note.createdBy else "Me",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
 
                         Spacer(Modifier.width(16.dp))
 
-                        Icon(Icons.Default.Person, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
-                        Spacer(Modifier.width(4.dp))
-                        // Assuming you might want to show who created it
-                        Text(if(note.createdBy.isNotEmpty()) note.createdBy else "Me", fontSize = 12.sp, color = Color.Gray)
-                    }
-
-                    // Delete Button
-                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Delete, "Delete", tint = Color.Gray)
+                        // Delete Button
+                        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Delete, "Delete", tint = Color.Gray)
+                        }
                     }
                 }
             }
         }
     }
 }
-
 @Composable
 fun RowScope.TabButton(text: String, isSelected: Boolean, onClick: () -> Unit) {
     Box(
@@ -601,8 +714,9 @@ fun CircularProgress(progress: Float, size: Dp, color: Color) {
 fun MaintAddNoteDialog(
     existingNote: PlannedWork?,
     onDismiss: () -> Unit,
-    // The signature expects 6 parameters now
-    onConfirm: (String, String, EquipmentType, Priority, Long, Uri?) -> Unit
+    onAttachMaterial: () -> Unit,
+    // [FIX] The signature has 7 parameters now. ExecutionDate is the 6th.
+    onConfirm: (String, String, EquipmentType, Priority, Long, Long?, Uri?) -> Unit
 ) {
     // 1. FORM STATE
     var title by remember { mutableStateOf(existingNote?.title ?: "") }
@@ -611,7 +725,11 @@ fun MaintAddNoteDialog(
     var selectedDate by remember { mutableLongStateOf(existingNote?.scheduledDate ?: System.currentTimeMillis()) }
     var equipmentExpanded by remember { mutableStateOf(false) }
     var selectedEquipment by remember { mutableStateOf(existingNote?.equipmentType ?: EquipmentType.GENERAL) }
-
+    // DATES
+    val creationDate = existingNote?.creationDate ?: System.currentTimeMillis()
+    var scheduledDate by remember { mutableLongStateOf(existingNote?.scheduledDate ?: System.currentTimeMillis()) }
+    // [NEW] Execution Date (Null if new/not set)
+    var executionDate by remember { mutableStateOf<Long?>(existingNote?.executionDate) }
     // 2. IMAGE STATE
     // Initialize with existing URL if editing, or null if new
     // Note: We only track *new* URIs here. If null, the ViewModel keeps the old one.
@@ -623,6 +741,10 @@ fun MaintAddNoteDialog(
     val calendar = Calendar.getInstance()
     val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
 
+    // 4. PICKER STATES [FIX: Defined here explicitly]
+    val showScheduledPicker = remember { mutableStateOf(false) }
+    val showExecutionPicker = remember { mutableStateOf(false) }
+
     // 4. LAUNCHERS
     // [FIX] Explicitly added 'success: Boolean' type
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -632,6 +754,8 @@ fun MaintAddNoteDialog(
             capturedImageUri = tempPhotoUri
         }
     }
+
+
 
     // [FIX] Explicitly added 'uri: Uri?' type
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -643,16 +767,21 @@ fun MaintAddNoteDialog(
     }
 
     // 5. DATE PICKER
-    val datePickerDialog = DatePickerDialog(
-        context,
-        { _, y, m, d ->
+    if (showScheduledPicker.value) {
+        DatePickerDialog(context, { _, y, m, d ->
             calendar.set(y, m, d)
-            selectedDate = calendar.timeInMillis
-        },
-        calendar.get(Calendar.YEAR),
-        calendar.get(Calendar.MONTH),
-        calendar.get(Calendar.DAY_OF_MONTH)
-    )
+            scheduledDate = calendar.timeInMillis
+            showScheduledPicker.value = false
+        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+    }
+
+    if (showExecutionPicker.value) {
+        DatePickerDialog(context, { _, y, m, d ->
+            calendar.set(y, m, d)
+            executionDate = calendar.timeInMillis // Set the execution date
+            showExecutionPicker.value = false
+        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -660,6 +789,12 @@ fun MaintAddNoteDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 // --- FORM FIELDS ---
+                Text(
+                    text = "Created: ${dateFormat.format(creationDate)}",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -697,18 +832,40 @@ fun MaintAddNoteDialog(
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = dateFormat.format(selectedDate),
+                    value = dateFormat.format(scheduledDate),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Date") },
+                    label = { Text("Scheduled Date (Plan)") },
                     trailingIcon = {
-                        IconButton(onClick = { datePickerDialog.show() }) {
+                        IconButton(onClick = { showScheduledPicker.value = true }) {
                             Icon(Icons.Default.DateRange, null)
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = if (executionDate != null) dateFormat.format(executionDate!!) else "Not Executed Yet",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Execution Date (Actual)") },
+                        trailingIcon = {
+                            IconButton(onClick = { showExecutionPicker.value = true }) {
+                                Icon(Icons.Default.CheckCircle, null, tint = if(executionDate != null) Color(0xFF2E7D32) else Color.Gray)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    // Clear Button
+                    if (executionDate != null) {
+                        IconButton(onClick = { executionDate = null }) {
+                            Icon(Icons.Default.Close, "Clear Date")
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
                         selected = priority == Priority.NORMAL,
@@ -725,6 +882,17 @@ fun MaintAddNoteDialog(
 
                 // --- PHOTO SECTION ---
                 Spacer(Modifier.height(16.dp))
+                Text("Store Materials:", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = onAttachMaterial,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ShoppingCart, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Issue / Receive Material for this Job")
+                }
                 Text("Attach Photo:", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
 
@@ -780,10 +948,10 @@ fun MaintAddNoteDialog(
         },
         confirmButton = {
             Button(onClick = {
-                // [FIX] Passing 'capturedImageUri' as the 6th argument
-                onConfirm(title, description, selectedEquipment, priority, selectedDate, capturedImageUri)
+                // [FIX] Correct Order: Title, Desc, Equip, Prio, SchedDate, ExecDate, Uri
+                onConfirm(title, description, selectedEquipment, priority, scheduledDate, executionDate, capturedImageUri)
             }) {
-                Text(if (existingNote == null) "Create Ticket" else "Update Ticket")
+                Text(if (existingNote == null) "Create" else "Save")
             }
         },
         dismissButton = {

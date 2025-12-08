@@ -142,6 +142,12 @@ fun AppDrawer(
                 selected = currentRoute == "diagnostics",
                 onClick = { navigateTo("diagnostics"); closeDrawer() }
             )
+            DrawerItem(
+                label = "Store Inventory",
+                icon = Icons.Default.ShoppingCart, // Or Icons.Default.List
+                selected = currentRoute == "store",
+                onClick = { navigateTo("store"); closeDrawer() }
+            )
 
             // Future expansion placeholders (commented out)
             // DrawerItem("Safety Manual", Icons.Default.Lock, false) {}
