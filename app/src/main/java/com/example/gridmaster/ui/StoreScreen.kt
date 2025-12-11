@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -21,7 +20,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gridmaster.data.StoreItem
-import com.example.gridmaster.data.TransactionType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,7 +27,7 @@ fun StoreScreen(
     viewModel: StoreViewModel = viewModel(factory = StoreViewModel.Factory),
     onOpenDrawer: () -> Unit
 ) {
-    // --- 1. STATE MANAGEMENT ---
+    // --- 1. STATES ---
     val inventory by viewModel.inventory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val context = LocalContext.current
@@ -37,8 +35,62 @@ fun StoreScreen(
     // Dialog States
     var showEditDialog by remember { mutableStateOf(false) }
     var showTransactionDialog by remember { mutableStateOf(false) }
-    var selectedItem by remember { mutableStateOf<StoreItem?>(null) } // The item being acted upon
+    var selectedItem by remember { mutableStateOf<StoreItem?>(null) } // For Edit/Trans
 
+    // Screen Navigation States
+    var selectedItemForDetail by remember { mutableStateOf<StoreItem?>(null) } // For Detail History
+    var showGlobalHistory by remember { mutableStateOf(false) } // For Global Log
+
+    // --- 2. NAVIGATION LOGIC (The Switchboard) ---
+
+    // A. Show Item Detail Screen (Individual History)
+    if (selectedItemForDetail != null) {
+        StoreDetailScreen(
+            item = selectedItemForDetail!!,
+            onBack = { selectedItemForDetail = null },
+            onTransactionClick = {
+                // Pass the click back to the main dialog logic
+                selectedItem = selectedItemForDetail
+                showTransactionDialog = true
+            }
+        )
+        // Helper: Allow Transaction Dialog to open ON TOP of Detail Screen
+        if (showTransactionDialog && selectedItem != null) {
+            StoreTransactionDialog(
+                item = selectedItem!!,
+                onDismiss = { showTransactionDialog = false },
+                // [UPDATE] Receiving 'txnDate' now
+                onConfirm = { type, qty, ref, remark, txnDate ->
+                    viewModel.executeTransaction(
+                        item = selectedItem!!,
+                        type = type,
+                        qtyStr = qty,
+                        ref = ref,
+                        remarks = remark,
+                        date = txnDate, // [UPDATE] Passing it to ViewModel
+                        onSuccess = {
+                            Toast.makeText(context, "Transaction Logged!", Toast.LENGTH_SHORT).show()
+                            showTransactionDialog = false
+                        },
+                        onError = { error ->
+                            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
+            )
+        }
+        return // Stop rendering the main list
+    }
+
+    // B. Show Global History Screen (The Master Log)
+    if (showGlobalHistory) {
+        GlobalTransactionScreen(
+            onBack = { showGlobalHistory = false }
+        )
+        return // Stop rendering the main list
+    }
+
+    // --- 3. MAIN DASHBOARD UI ---
     Scaffold(
         topBar = {
             Column(
@@ -65,18 +117,30 @@ fun StoreScreen(
                         )
                     }
 
-                    // Export Button (For MAS Excel)
-                    IconButton(
-                        onClick = { viewModel.exportMasReport(context) },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                    ) {
-                        Icon(Icons.Default.Share, "Export MAS", tint = MaterialTheme.colorScheme.primary)
+                    Row {
+                        // [BUTTON 1] Global History Log
+                        IconButton(
+                            onClick = { showGlobalHistory = true }, // This uses the variable!
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        ) {
+                            Icon(Icons.Default.List, "Global Log", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        // [BUTTON 2] Export MAS
+                        IconButton(
+                            onClick = { viewModel.exportMasReport(context) },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                        ) {
+                            Icon(Icons.Default.Share, "Export MAS", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
-                // --- SEARCH BAR ---
+                // Search Bar
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { viewModel.setSearchQuery(it) },
@@ -106,9 +170,9 @@ fun StoreScreen(
             }
         }
     ) { padding ->
-        // --- 2. INVENTORY LIST ---
+        // INVENTORY LIST
         LazyColumn(
-            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp), // Space for FAB
+            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
@@ -123,9 +187,8 @@ fun StoreScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (searchQuery.isEmpty()) "No items in store.\nTap + to add." else "No matches found.",
-                            color = Color.Gray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            text = if (searchQuery.isEmpty()) "Loading Store..." else "No matches found.",
+                            color = Color.Gray
                         )
                     }
                 }
@@ -135,12 +198,12 @@ fun StoreScreen(
                 StoreItemCard(
                     item = item,
                     onClick = {
-                        // Tapping the card opens "Issue / Receive"
-                        selectedItem = item
-                        showTransactionDialog = true
+                        // Open Detail History
+                        selectedItemForDetail = item
+                        selectedItem = item // Also set this for context
                     },
                     onEditClick = {
-                        // [NEW] Clicking the Pencil opens "Master Edit"
+                        // Open Admin Edit
                         selectedItem = item
                         showEditDialog = true
                     }
@@ -149,20 +212,22 @@ fun StoreScreen(
         }
     }
 
-    // --- 3. DIALOGS ---
+    // --- 4. DIALOGS (Transaction & Edit) ---
 
-    // A. TRANSACTION DIALOG (The Daily Driver)
+    // A. Transaction Dialog (Issue/Receive)
     if (showTransactionDialog && selectedItem != null) {
         StoreTransactionDialog(
             item = selectedItem!!,
             onDismiss = { showTransactionDialog = false },
-            onConfirm = { type, qty, ref, remark ->
+            // [UPDATE] Receiving 'txnDate' now
+            onConfirm = { type, qty, ref, remark, txnDate ->
                 viewModel.executeTransaction(
                     item = selectedItem!!,
                     type = type,
                     qtyStr = qty,
                     ref = ref,
                     remarks = remark,
+                    date = txnDate, // [UPDATE] Passing it to ViewModel
                     onSuccess = {
                         Toast.makeText(context, "Transaction Logged!", Toast.LENGTH_SHORT).show()
                         showTransactionDialog = false
@@ -175,14 +240,13 @@ fun StoreScreen(
         )
     }
 
-    // B. MASTER EDIT DIALOG (The Admin Tool)
+    // B. Master Edit Dialog (Admin)
     if (showEditDialog) {
         StoreEditDialog(
-            item = selectedItem, // If null, dialog enters "Add New" mode
+            item = selectedItem,
             onDismiss = { showEditDialog = false },
             onSave = { updatedItem ->
                 if (selectedItem == null) {
-                    // Creating New
                     viewModel.addNewItem(
                         legacyName = updatedItem.legacyName,
                         sapName = updatedItem.sapName,
@@ -193,7 +257,6 @@ fun StoreScreen(
                         initialQty = updatedItem.quantity.toString()
                     )
                 } else {
-                    // Updating Existing
                     viewModel.updateItemDetails(updatedItem)
                 }
                 showEditDialog = false

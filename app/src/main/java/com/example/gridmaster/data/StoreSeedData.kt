@@ -8,7 +8,7 @@ val initialStoreInventory = listOf(
     StoreItem(legacyName = "33 KV VCB Areva Make", sapName = "36KV VCB with Structure", masterSn = 55, unit = "NO.", unitRate = 10000.0, quantity = 1.0, nickname = "Repaired"),
     StoreItem(legacyName = "ACSR Panther conductor", sapName = "ACSR PANTHER CONDUCTOR", masterSn = 1, unit = "MTR.", unitRate = 147.05, quantity = 285.0, nickname = ""),
     StoreItem(legacyName = "ACSR Panther- Conductor", sapName = "ACSR PANTHER CONDUCTOR", masterSn = 101, unit = "KM", unitRate = 113557.99, quantity = 0.85, nickname = ""),
-    StoreItem(legacyName = "ACSR Zebra conductor", sapName = "ACSR ZEBRA CONDUCTOR", masterSn = 73, unit = "MTR.", unitRate = 233.367, quantity = 182.0, nickname = "Issued to Site"),
+    StoreItem(legacyName = "ACSR Zebra conductor", sapName = "ACSR ZEBRA CONDUCTOR", masterSn = 73, unit = "MTR.", unitRate = 233.367, quantity = 182.0, nickname = "Active Stock"),
     StoreItem(legacyName = "132KV NCT(Big),Make-CGL.(800-400-200-100/1)", sapName = "132KV 1 CORE NCTOF PRIMARY CURRENT 800A", masterSn = 72, unit = "NO.", unitRate = 5000.0, quantity = 1.0, nickname = ""),
     StoreItem(legacyName = "33KV CT (400-200-100/1-1-1 A)", sapName = "36KV CT OF RATIO 400-200-100/1-1-1A", masterSn = 76, unit = "NO.", unitRate = 5000.0, quantity = 1.0, nickname = ""),
     StoreItem(legacyName = "33 KV CT 400-200-100/1-1-1", sapName = "36KV CT OF RATIO 400-200-100/1-1-1A", masterSn = 89, unit = "NO.", unitRate = 1000.0, quantity = 1.0, nickname = "Old and defective"),

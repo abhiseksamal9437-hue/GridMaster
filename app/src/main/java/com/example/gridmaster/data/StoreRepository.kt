@@ -30,7 +30,14 @@ class StoreRepository {
     }
 
     // --- 2. EXECUTE TRANSACTION (The Accountant) ---
-    suspend fun executeTransaction(item: StoreItem, type: TransactionType, qty: Double, ref: String, remarks: String) {
+    suspend fun executeTransaction(
+        item: StoreItem,
+        type: TransactionType,
+        qty: Double,
+        ref: String,
+        remarks: String,
+        date: Long // [NEW PARAMETER]
+    ) {
         val (uid, name) = getCurrentUser()
 
         // Use a "Batch" or "Transaction" to ensure safety
@@ -59,7 +66,7 @@ class StoreRepository {
                 itemName = item.legacyName, // We log the Legacy Name for history
                 type = type,
                 quantity = qty,
-                date = System.currentTimeMillis(),
+                date = date,
                 reference = ref,
                 remarks = remarks,
                 userId = uid,
@@ -94,5 +101,34 @@ class StoreRepository {
             ?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             ?: "Unknown"
         return Pair(uid, name)
+    }
+    // ... inside StoreRepository ...
+    fun getItemHistory(itemId: String): Flow<List<StoreTransaction>> = callbackFlow {
+        val ref = db.collection("store_transactions")
+            .whereEqualTo("itemId", itemId)
+            .orderBy("date", Query.Direction.DESCENDING) // Newest first
+
+        val sub = ref.addSnapshotListener { s, _ ->
+            if (s != null) {
+                val list = s.documents.mapNotNull { it.toObject(StoreTransaction::class.java) }
+                trySend(list)
+            }
+        }
+        awaitClose { sub.remove() }
+    }
+    // ... inside StoreRepository ...
+
+    // [NEW] Get Global History (All items, sorted by date)
+    fun getAllTransactions(): Flow<List<StoreTransaction>> = callbackFlow {
+        val ref = db.collection("store_transactions")
+            .orderBy("date", Query.Direction.DESCENDING) // Newest first
+
+        val sub = ref.addSnapshotListener { s, _ ->
+            if (s != null) {
+                val list = s.documents.mapNotNull { it.toObject(StoreTransaction::class.java) }
+                trySend(list)
+            }
+        }
+        awaitClose { sub.remove() }
     }
 }

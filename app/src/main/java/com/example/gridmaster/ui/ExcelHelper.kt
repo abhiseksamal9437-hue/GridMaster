@@ -23,6 +23,13 @@ import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import org.apache.poi.ss.usermodel.BorderStyle
+import org.apache.poi.ss.usermodel.FillPatternType
+import org.apache.poi.ss.usermodel.HorizontalAlignment
+import org.apache.poi.ss.usermodel.IndexedColors
+import org.apache.poi.ss.usermodel.VerticalAlignment
+import java.util.Calendar // [FIX] Added this import
+
 
 object ExcelHelper {
 
@@ -236,5 +243,141 @@ object ExcelHelper {
             e.printStackTrace()
             Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+    // ... inside ExcelHelper object ...
+
+    // ==========================================
+    // 3. MAS STORE REPORT GENERATOR
+    // ==========================================
+    fun generateMasReport(
+        context: Context,
+        items: List<com.example.gridmaster.data.StoreItem>,
+        transactions: List<com.example.gridmaster.data.StoreTransaction>,
+        reportMonthMillis: Long
+    ) {
+        val workbook = XSSFWorkbook()
+        val sheet = workbook.createSheet("MAS Report")
+
+        // --- STYLES ---
+        val headerStyle = workbook.createCellStyle().apply {
+            fillForegroundColor = IndexedColors.GREY_25_PERCENT.index
+            fillPattern = FillPatternType.SOLID_FOREGROUND
+            alignment = HorizontalAlignment.CENTER
+            verticalAlignment = VerticalAlignment.CENTER
+            borderBottom = BorderStyle.THIN
+            borderTop = BorderStyle.THIN
+            borderLeft = BorderStyle.THIN
+            borderRight = BorderStyle.THIN
+            wrapText = true
+        }
+        val font = workbook.createFont().apply { bold = true }
+        headerStyle.setFont(font)
+
+        val dataStyle = workbook.createCellStyle().apply {
+            borderBottom = BorderStyle.THIN
+            borderLeft = BorderStyle.THIN
+            borderRight = BorderStyle.THIN
+            verticalAlignment = VerticalAlignment.CENTER
+        }
+
+        // --- HEADER ROW (Row 0) ---
+        // We match your specific 14-column layout
+        val headerRow = sheet.createRow(0)
+        val headers = listOf(
+            "S.N.", "NAME OF MATERIALS", "UNIT", "O/B",
+            "REC DATE", "REC REF", "REC QTY", // Receipt Group
+            "ISS DATE", "ISS REF", "ISS QTY", // Issue Group
+            "C/B", "UNIT RATE", "TOTAL VALUE", "REMARKS", "SAP DESC"
+        )
+
+        headers.forEachIndexed { i, title ->
+            val cell = headerRow.createCell(i)
+            cell.setCellValue(title)
+            cell.cellStyle = headerStyle
+            // Set basic column widths
+            sheet.setColumnWidth(i, if(i==1 || i==14) 8000 else 3000)
+        }
+
+        // --- DATA PROCESSING ---
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = reportMonthMillis
+        val targetMonth = calendar.get(Calendar.MONTH)
+        val targetYear = calendar.get(Calendar.YEAR)
+        val dateFormat = SimpleDateFormat("dd.MM.yy", Locale.getDefault())
+
+        // Sort items by SortIndex (Excel Row Order)
+        val sortedItems = items.sortedBy { it.sortIndex }
+
+        sortedItems.forEachIndexed { index, item ->
+            val row = sheet.createRow(index + 1)
+            row.heightInPoints = 40f // Give some breathing room
+
+            // 1. Find Transactions for THIS item in THIS month
+            val itemTxns = transactions.filter { txn ->
+                txn.itemId == item.id && isSameMonth(txn.date, targetMonth, targetYear)
+            }
+
+            val totalReceived = itemTxns.filter { it.type == com.example.gridmaster.data.TransactionType.RECEIVE }.sumOf { it.quantity }
+            val totalIssued = itemTxns.filter { it.type == com.example.gridmaster.data.TransactionType.ISSUE }.sumOf { it.quantity }
+
+            // 2. Calculate Opening Balance (O/B = C/B + Issued - Received)
+            // Note: item.quantity is the CURRENT live stock (Closing Balance)
+            val closingBalance = item.quantity
+            val openingBalance = closingBalance + totalIssued - totalReceived
+
+            // 3. Prepare Receipt/Issue Strings (Aggregate if multiple)
+            val recTxns = itemTxns.filter { it.type == com.example.gridmaster.data.TransactionType.RECEIVE }
+            val issTxns = itemTxns.filter { it.type == com.example.gridmaster.data.TransactionType.ISSUE }
+
+            val recDate = recTxns.joinToString("\n") { dateFormat.format(it.date) }
+            val recRef = recTxns.joinToString("\n") { it.reference }
+            val recQty = if(totalReceived > 0) totalReceived.toString() else "-"
+
+            val issDate = issTxns.joinToString("\n") { dateFormat.format(it.date) }
+            val issRef = issTxns.joinToString("\n") { it.reference }
+            val issQty = if(totalIssued > 0) totalIssued.toString() else "-"
+
+            // 4. FILL CELLS
+            createCell(row, 0, item.masterSn.toString(), dataStyle)
+            createCell(row, 1, item.legacyName, dataStyle)
+            createCell(row, 2, item.unit, dataStyle)
+            createCell(row, 3, String.format("%.2f", openingBalance), dataStyle) // O/B
+
+            // Receipt
+            createCell(row, 4, recDate, dataStyle)
+            createCell(row, 5, recRef, dataStyle)
+            createCell(row, 6, recQty, dataStyle)
+
+            // Issue
+            createCell(row, 7, issDate, dataStyle)
+            createCell(row, 8, issRef, dataStyle)
+            createCell(row, 9, issQty, dataStyle)
+
+            // Closing & Financials
+            createCell(row, 10, String.format("%.2f", closingBalance), dataStyle) // C/B
+            createCell(row, 11, item.unitRate.toString(), dataStyle)
+            createCell(row, 12, String.format("%.2f", closingBalance * item.unitRate), dataStyle) // Rate
+
+            // Remarks & SAP
+            createCell(row, 13, item.nickname, dataStyle)
+            createCell(row, 14, item.sapName, dataStyle)
+        }
+
+        // Generate Filename: "MAS_Report_Oct_2025.xlsx"
+        val fileMonth = SimpleDateFormat("MMM_yyyy", Locale.getDefault()).format(reportMonthMillis)
+        saveToDownloads(context, workbook, "MAS_Report_$fileMonth.xlsx")
+    }
+
+    // Helper for Clean Cell Creation
+    private fun createCell(row: org.apache.poi.ss.usermodel.Row, index: Int, value: String, style: org.apache.poi.ss.usermodel.CellStyle) {
+        val cell = row.createCell(index)
+        cell.setCellValue(value)
+        cell.cellStyle = style
+    }
+
+    private fun isSameMonth(dateMillis: Long, targetMonth: Int, targetYear: Int): Boolean {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = dateMillis
+        return cal.get(Calendar.MONTH) == targetMonth && cal.get(Calendar.YEAR) == targetYear
     }
 }

@@ -12,6 +12,36 @@ import kotlinx.coroutines.launch
 
 class StoreViewModel(private val repository: StoreRepository) : ViewModel() {
 
+    // ... inside StoreViewModel ...
+
+    // --- GLOBAL HISTORY STATES ---
+    private val _selectedMonth = MutableStateFlow(System.currentTimeMillis())
+    val selectedMonth = _selectedMonth.asStateFlow()
+
+    // Filtered Global History
+    val globalHistory: StateFlow<List<StoreTransaction>> = combine(
+        repository.getAllTransactions(),
+        _selectedMonth
+    ) { transactions, monthMillis ->
+        // logic to filter by selected month
+        val calendar = java.util.Calendar.getInstance()
+        calendar.timeInMillis = monthMillis
+        val targetMonth = calendar.get(java.util.Calendar.MONTH)
+        val targetYear = calendar.get(java.util.Calendar.YEAR)
+
+        transactions.filter { txn ->
+            calendar.timeInMillis = txn.date
+            val txnMonth = calendar.get(java.util.Calendar.MONTH)
+            val txnYear = calendar.get(java.util.Calendar.YEAR)
+
+            txnMonth == targetMonth && txnYear == targetYear
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setHistoryMonth(millis: Long) {
+        _selectedMonth.value = millis
+    }
+
     // --- 1. SEARCH STATE ---
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
@@ -70,6 +100,7 @@ class StoreViewModel(private val repository: StoreRepository) : ViewModel() {
         qtyStr: String,
         ref: String,
         remarks: String,
+        date: Long, // [NEW PARAMETER]
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -81,8 +112,8 @@ class StoreViewModel(private val repository: StoreRepository) : ViewModel() {
             }
 
             try {
-                // Determine transaction type and execute
-                repository.executeTransaction(item, type, qty, ref, remarks)
+                // Pass the date to the repository
+                repository.executeTransaction(item, type, qty, ref, remarks, date)
                 onSuccess()
             } catch (e: Exception) {
                 onError(e.message ?: "Transaction Failed")
@@ -129,9 +160,7 @@ class StoreViewModel(private val repository: StoreRepository) : ViewModel() {
     }
 
     // --- 6. EXPORT LOGIC (Placeholder for Future Phase) ---
-    fun exportMasReport(context: Context) {
-        // This will be implemented when we build the MAS Report generator
-    }
+
 
     // --- FACTORY ---
     companion object {
@@ -139,6 +168,27 @@ class StoreViewModel(private val repository: StoreRepository) : ViewModel() {
             initializer {
                 StoreViewModel(StoreRepository())
             }
+        }
+    }
+    // ... inside StoreViewModel ...
+    fun getItemHistory(itemId: String): Flow<List<StoreTransaction>> {
+        return repository.getItemHistory(itemId)
+    }
+    // ... inside StoreViewModel ...
+
+    fun exportMasReport(context: Context) {
+        viewModelScope.launch {
+            // 1. Get All Items
+            val items = repository.getStoreItems().first()
+
+            // 2. Get All Transactions
+            val allTransactions = repository.getAllTransactions().first()
+
+            // 3. Generate Report for the CURRENT month
+            // (You could pass a specific month, but usually you export the current status)
+            ExcelHelper.generateMasReport(context, items, allTransactions, System.currentTimeMillis())
+
+            android.widget.Toast.makeText(context, "MAS Report Downloaded!", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 }

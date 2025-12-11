@@ -338,8 +338,10 @@ fun MaintenanceScreen(
         StoreTransactionDialog(
             item = selectedStoreItem!!,
             onDismiss = { showStoreTransDialog = false },
-            onConfirm = { type, qty, ref, remark ->
-                // Use Work Order Title as the "Reference" if available, else "Work Order"
+            // [FIX] Added 'txnDate' (the 5th parameter)
+            onConfirm = { type, qty, ref, remark, txnDate ->
+
+                // Use Work Order Title as the "Reference"
                 val jobRef = if (noteToEdit?.title?.isNotEmpty() == true) "WO: ${noteToEdit!!.title}" else "New Work Order"
 
                 storeViewModel.executeTransaction(
@@ -348,6 +350,7 @@ fun MaintenanceScreen(
                     qtyStr = qty,
                     ref = jobRef,
                     remarks = remark,
+                    date = txnDate, // [FIX] Pass the date to the ViewModel
                     onSuccess = {
                         // [AUTO-LOGIC] Append the transaction to the Work Order Description
                         val action = if(type == TransactionType.ISSUE) "Issued" else "Received"
@@ -356,10 +359,6 @@ fun MaintenanceScreen(
                         // Update the Note being edited so the user sees the change immediately
                         if (noteToEdit != null) {
                             noteToEdit = noteToEdit!!.copy(description = noteToEdit!!.description + logLine)
-                        } else {
-                            // If it's a new note, we can't easily update the dialog state from here without complex state hoisting.
-                            // For V1, we simply Toast.
-                            // In V2, we can hoist the 'description' state to the parent.
                         }
 
                         Toast.makeText(context, "Material Transaction Logged!", Toast.LENGTH_SHORT).show()

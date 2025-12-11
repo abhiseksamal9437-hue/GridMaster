@@ -26,6 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.gridmaster.data.StoreItem
 import com.example.gridmaster.data.TransactionType
+import android.app.DatePickerDialog // [NEW IMPORT]
+import androidx.compose.ui.platform.LocalContext // [NEW IMPORT]
+import java.util.Calendar
+import java.util.Locale
+import java.text.SimpleDateFormat
+import androidx.compose.material.icons.filled.DateRange
 
 // ==========================================
 // 1. THE "SMART ASSET" CARD
@@ -139,12 +145,32 @@ fun StoreItemCard(
 fun StoreTransactionDialog(
     item: StoreItem,
     onDismiss: () -> Unit,
-    onConfirm: (TransactionType, String, String, String) -> Unit
+    // [UPDATE] Added 'Long' to the callback for the Date
+    onConfirm: (TransactionType, String, String, String, Long) -> Unit
 ) {
     var type by remember { mutableStateOf(TransactionType.ISSUE) }
     var qty by remember { mutableStateOf("") }
     var ref by remember { mutableStateOf("") }
     var remarks by remember { mutableStateOf("") }
+
+    // [NEW] Date State (Defaults to Today)
+    var transactionDate by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    val context = LocalContext.current
+    val calendar = Calendar.getInstance()
+    val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+
+    // Date Picker Logic
+    val datePickerDialog = DatePickerDialog(
+        context,
+        { _, year, month, day ->
+            calendar.set(year, month, day)
+            transactionDate = calendar.timeInMillis
+        },
+        calendar.get(Calendar.YEAR),
+        calendar.get(Calendar.MONTH),
+        calendar.get(Calendar.DAY_OF_MONTH)
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -156,6 +182,7 @@ fun StoreTransactionDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 1. Issue/Receive Toggle
                 Row(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { type = TransactionType.ISSUE },
@@ -169,6 +196,22 @@ fun StoreTransactionDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = if (type == TransactionType.RECEIVE) Color(0xFF2E7D32) else Color.LightGray)
                     ) { Text("RECEIVE (+)") }
                 }
+
+                // 2. [NEW] Date Picker Field
+                OutlinedTextField(
+                    value = dateFormat.format(transactionDate),
+                    onValueChange = {},
+                    readOnly = true, // User must use the icon
+                    label = { Text("Transaction Date") },
+                    trailingIcon = {
+                        IconButton(onClick = { datePickerDialog.show() }) {
+                            Icon(Icons.Default.DateRange, "Select Date")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // 3. Other Fields
                 OutlinedTextField(value = qty, onValueChange = { qty = it }, label = { Text("Quantity (${item.unit})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = ref, onValueChange = { ref = it }, label = { Text(if (type == TransactionType.ISSUE) "Site / Indent No" else "Supplier / Challan No") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = remarks, onValueChange = { remarks = it }, label = { Text("Remarks (Optional)") }, modifier = Modifier.fillMaxWidth())
@@ -176,7 +219,7 @@ fun StoreTransactionDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(type, qty, ref, remarks) },
+                onClick = { onConfirm(type, qty, ref, remarks, transactionDate) }, // Pass the date!
                 colors = ButtonDefaults.buttonColors(containerColor = if (type == TransactionType.ISSUE) Color(0xFFD32F2F) else Color(0xFF2E7D32))
             ) { Text("CONFIRM") }
         },

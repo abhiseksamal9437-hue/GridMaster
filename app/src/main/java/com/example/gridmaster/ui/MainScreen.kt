@@ -69,6 +69,7 @@ fun MainScreen(
                 startDestination = "login",
                 modifier = Modifier.padding(innerPadding)
             ) {
+
                 // LOGIN & SPLASH (No Drawer needed here)
                 composable("login") {
                     LoginScreen(onLoginSuccess = {
